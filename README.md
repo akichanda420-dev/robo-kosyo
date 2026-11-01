@@ -2,13 +2,19 @@
 
 工場を組んでパーツを作り、ロボを組み上げて戦わせるゲームです。工場づくり、ローグライクの3連戦、対戦の要素があります。
 
+## ダウンロード（Windows版）
+
+**[robo-kosho-win.zip をダウンロード](https://github.com/akichanda420-dev/robo-kosyo/raw/main/download/robo-kosho-win.zip)**
+
+展開して `robo-kosho.exe` をダブルクリックします。`robo-relay.exe` は同じフォルダに置いたままにしてください（LAN対戦で使います）。初回に「WindowsによってPCが保護されました」と出たら「詳細情報」→「実行」。遊び方は同梱の「はじめにお読みください.txt」にあります。
+
 ## 遊び方
 
 | 版 | 場所 | オンライン対戦 |
 |---|---|---|
 | ブラウザ版（claude.ai） | `claude-artifact.html` を claude.ai のアーティファクトとして公開したもの | できる |
 | Web版（GitHub Pages） | `docs/` | できない |
-| Windows版（exe） | Releases | できる（LAN / Hamachi） |
+| Windows版（exe） | `download/robo-kosho-win.zip` | できる（LAN / Hamachi） |
 
 - ブラウザ版のオンライン対戦は claude.ai のアーティファクト機能（room / user / db）を使います。
 - Windows版は、ホストが `robo-relay.exe`（中継サーバー）を起動し、ゲストがホストのアドレス（Hamachi なら 25.x.x.x）へつなぐ LAN 対戦です。遊び方は `desktop/はじめにお読みください.txt`。
