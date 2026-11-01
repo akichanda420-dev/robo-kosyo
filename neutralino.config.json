@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
+  "applicationId": "jp.robokosho.app",
+  "applicationName": "RoboKosho",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 48731,
+  "documentRoot": "/docs/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": false,
+  "singlePageServe": false,
+  "tokenSecurity": "one-time",
+  "logging": { "enabled": false, "writeToLogFile": false },
+  "nativeAllowList": [],
+  "modes": {
+    "window": {
+      "title": "ロボ工廠",
+      "width": 1440,
+      "height": 920,
+      "minWidth": 400,
+      "minHeight": 500,
+      "center": true,
+      "resizable": true,
+      "icon": "/docs/icon.png",
+      "enableInspector": false,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "robo-kosho",
+    "resourcesPath": "/docs/",
+    "extensionsPath": "/extensions/",
+    "binaryVersion": "6.4.0",
+    "clientVersion": "6.4.0"
+  }
+}
