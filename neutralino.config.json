@@ -8,11 +8,17 @@
   "documentRoot": "/docs/",
   "url": "/",
   "enableServer": true,
-  "enableNativeAPI": false,
+  "enableNativeAPI": true,
   "singlePageServe": false,
   "tokenSecurity": "one-time",
-  "logging": { "enabled": false, "writeToLogFile": false },
-  "nativeAllowList": [],
+  "logging": {
+    "enabled": false,
+    "writeToLogFile": false
+  },
+  "nativeAllowList": [
+    "os.spawnProcess",
+    "os.updateSpawnedProcess"
+  ],
   "modes": {
     "window": {
       "title": "ロボ工廠",

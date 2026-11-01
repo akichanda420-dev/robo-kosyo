@@ -323,6 +323,10 @@ body.locked #pauseBtn,body.locked #speedSeg,body.locked #newBtn,body.locked #mod
 .runtrack i{width:18px;height:1px;background:var(--line)}
 .lobby-box{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
 .lobby-box.hot{border-color:var(--brass)}
+.lan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.lan-in{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--fg);font:inherit;min-width:0}
+.lan-row{display:flex;gap:8px}.lan-row .lan-in{flex:1}
+b.lan-ip{font-family:var(--f-mono);font-size:17px;color:var(--fg);user-select:all}
 .lobby-box h3{font-family:var(--f-display);font-weight:400;font-size:15px;margin:0;color:var(--brass)}
 .seg-r{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:13px}
 .seg-r label{display:flex;gap:6px;align-items:center;cursor:pointer}
@@ -2788,6 +2792,12 @@ function openLobby(fmt){
   if(document.body.classList.contains('inbattle'))return;
   if(!$('overlay').hidden&&!lobbyOpen)$('overlay').hidden=true;
   lobbyPrevPause=S.paused;if(S.phase==='build')S.paused=true;
+  if(!ROOM&&window.ROBO_LAN){
+    // デスクトップ版：LAN（Hamachi など）でホストかゲストとしてつなぐ
+    $('overlay').hidden=false;
+    ROBO_LAN.dialog($('modal'),(r,u)=>{ROOM=r;USER=u;ROOM.onPeers(()=>{if(lobbyOpen&&!GAME)renderLobby()},()=>{});S.paused=lobbyPrevPause;openLobby()},closeLobby);
+    return;
+  }
   if(!ROOM){
     $('modal').innerHTML=`<div><div class="eyebrow">オンライン対戦</div><h2>このページではつながりません</h2><p>オンライン対戦は、claude.ai にサインインした状態で、このページを共有された人どうしで遊べます。公開リンクから開いたときや、サインインしていないときは使えません。</p></div><div class="mfoot"><span></span><button class="btn on" type="button" id="lobbyClose">閉じる</button></div>`;
     $('overlay').hidden=false;$('lobbyClose').onclick=closeLobby;return;
@@ -2829,15 +2839,18 @@ async function renderLobby(){
         ${onlineSrc==='sample'?'<button class="btn" type="button" id="reSample">別のサンプルにする</button>':''}</div>
       <div class="lrobo">${roboThumb(mine)}<p>体力 ${sum.hp} ・ 素早さ ${sum.spd} ・ 星の合計 ★${sum.st}</p></div></section>`
       :`<section class="lobby-box"><h3>製造から対戦</h3><p>承諾されると、二人とも同じ盤面で6分間の製造を同時に始めます。一時停止と倍速は使えません。製造を終えたら、できた機体どうしで対戦します。</p></section>`;
-    $('modal').innerHTML=`<div><div class="eyebrow">オンライン対戦</div><h2>ロビー</h2><p>このページを今開いている人と対戦できます。相手を選んで挑戦し、承諾されると始まります。相手にもこのページを共有しておいてください。</p></div>
+    const LAN=window.ROBO_LAN&&ROBO_LAN.active()?ROBO_LAN:null;
+    $('modal').innerHTML=`<div><div class="eyebrow">オンライン対戦${LAN?' ・ LAN':''}</div><h2>ロビー</h2><p>${LAN?'同じ中継（ホスト）につないでいる人と対戦できます。相手を選んで挑戦し、承諾されると始まります。':'このページを今開いている人と対戦できます。相手を選んで挑戦し、承諾されると始まります。相手にもこのページを共有しておいてください。'}</p></div>
+    ${LAN?LAN.lobbyNote():''}
     <div class="seg-r fmt"><span class="clock-label">対戦形式</span><label><input type="radio" name="ofmt" value="std" ${lobbyFmt==='std'?'checked':''}> 製造から対戦</label><label><input type="radio" name="ofmt" value="robo" ${lobbyFmt==='robo'?'checked':''}> 機体で対戦</label></div>
     ${srcSel}
     ${incoming.length?`<section class="lobby-box hot"><h3>挑戦が届いています</h3><table class="ctab"><tbody>${incoming.map(p=>{const m=p.presence.inv.m==='std'?'std':'robo';return `<tr><td class="nm">${nm(p)}</td><td><span class="chip" style="--c:${m==='std'?'#5fb0c9':'#b98ae6'}">${FMT_N[m]}</span></td><td style="text-align:right"><button class="btn" type="button" data-dec="${esc(p.peer)}">見送る</button> <button class="btn on" type="button" data-acc="${esc(p.peer)}">受けて立つ</button></td></tr>`}).join('')}</tbody></table>${incoming.some(p=>p.presence.inv.m!=='std')?'<p class="clock-label">「機体で対戦」の挑戦を受けると、上で選んでいる機体で戦います。</p>':''}</section>`:''}
     <section class="lobby-box"><h3>ロビーにいる人（${others.length}）</h3>
-      ${others.length?`<div class="rtable-wrap"><table class="ctab"><thead><tr><th>名前</th><th>形式</th><th>機体</th><th>状態</th><th></th></tr></thead><tbody>${others.map(row).join('')}</tbody></table></div>`:'<p>まだ誰もいません。このページを共有した相手が「オンライン対戦」を開くと、ここに表示されます。</p>'}
+      ${others.length?`<div class="rtable-wrap"><table class="ctab"><thead><tr><th>名前</th><th>形式</th><th>機体</th><th>状態</th><th></th></tr></thead><tbody>${others.map(row).join('')}</tbody></table></div>`:(LAN?'<p>まだ誰もいません。相手がホストに接続して「オンライン対戦」を開くと、ここに表示されます。</p>':'<p>まだ誰もいません。このページを共有した相手が「オンライン対戦」を開くと、ここに表示されます。</p>')}
     </section>
-    <div class="mfoot"><span class="clock-label">${ROOM.connected()?'接続中':'接続を待っています…'} ・ 挑戦は自分の対戦形式で送られます</span><button class="btn" type="button" id="lobbyClose">閉じる</button></div>`;
+    <div class="mfoot"><span class="clock-label">${ROOM.connected()?'接続中':'接続を待っています…'} ・ 挑戦は自分の対戦形式で送られます</span><div style="display:flex;gap:8px">${LAN?'<button class="btn" type="button" id="lanOff">切断する</button>':''}<button class="btn" type="button" id="lobbyClose">閉じる</button></div></div>`;
     $('lobbyClose').onclick=closeLobby;
+    if($('lanOff'))$('lanOff').onclick=()=>{closeLobby();ROBO_LAN.disconnect();ROOM=null;USER=null;toast('LAN対戦から切断しました')};
     $('modal').querySelectorAll('input[name=ofmt]').forEach(el=>el.onchange=()=>{lobbyFmt=el.value;setLobbyPresence();renderLobby()});
     $('modal').querySelectorAll('input[name=osrc]').forEach(el=>el.onchange=()=>{onlineSrc=el.value;if(onlineSrc==='saved'&&!onlineSavedId&&garage[0])onlineSavedId=garage[0].id;setLobbyPresence();renderLobby()});
     const ss=$('savedSel');if(ss)ss.onchange=()=>{onlineSavedId=ss.value;setLobbyPresence();renderLobby()};
