@@ -378,7 +378,7 @@ b.lan-ip{font-family:var(--f-mono);font-size:17px;color:var(--fg);user-select:al
       <div class="tut" id="tut" hidden></div>
       <div class="board-scroll"><canvas id="board" aria-label="工場の盤面 横32×縦24"></canvas></div>
       <div class="legend" id="legend"></div>
-      <div class="keys">左ドラッグで設置／右クリックで撤去（スマホは長押し）・ <kbd>R</kbd> 回転 ・ <kbd>B</kbd> ベルト ・ <kbd>P</kbd> パイプ ・ <kbd>S</kbd>/<kbd>D</kbd> 分配器 ・ <kbd>X</kbd> 撤去 ・ <kbd>1</kbd>〜<kbd>6</kbd> 設備 ・ <kbd>Space</kbd> 一時停止 ・ <kbd>Esc</kbd> 選択解除</div>
+      <div class="keys">左ドラッグで設置／右クリックで撤去（スマホは長押し）・ <kbd>R</kbd> 回転 ・ <kbd>B</kbd> ベルト ・ <kbd>P</kbd> パイプ ・ <kbd>S</kbd>/<kbd>D</kbd> 分配器 ・ <kbd>X</kbd> 撤去 ・ <kbd>1</kbd>〜<kbd>6</kbd> 設備 ・ <kbd>Z</kbd> 元に戻す ・ <kbd>Space</kbd> 一時停止（スタンダード以外） ・ <kbd>Esc</kbd> 選択解除</div>
     </section>
     <div class="subgrid">
       <section class="card-s">
@@ -1473,6 +1473,9 @@ function tier(id){const [p,a,t]=id.split(':');switch(p){case 'molten':return 1;c
 function attrOf(sec){if(!sec)return '';const a=arg(sec);return a.split('+').map(g=>RES[g].attr).join('・')}
 
 // ---------- state ----------
+// スタンダードは一時停止なし（メニューを開いていても時間は進む）
+const noPause=()=>!!S&&S.mode==='std'&&!S.tut;
+const isPaused=()=>S.paused&&!noPause();
 let S=null,tool=null,rot=0,hover=null,drag=null,anim=0,speedPref=1;
 function defMods(){return{extract:1,pump:1,resonance:false,furnace:1,magmaSave:false,spirit:1,chem:1,oilSave:0,mold:1,belt:1,pipe:1,underground:true,twin:0,firstDouble:false,attr:0,alloyBonus:0,gemDouble:0,all:1,dup:0,cap:1,inspect:false,flow:false,forge:0}}
 
@@ -1973,15 +1976,15 @@ function uiTick(now){
   const inf=S.total===Infinity;
   $('timeLeft').textContent=S.tut?'練習':inf?fmt(S.time):fmt(left);
   {const urg=!S.tut&&!inf&&S.phase==='build'&&left<=30;$('timeLeft').classList.toggle('urgent',urg);
-   const sec=Math.ceil(left);if(urg&&!S.paused&&sec<=10&&sec!==uiTick.lastSec){uiTick.lastSec=sec;SFX.play('tick')}}
+   const sec=Math.ceil(left);if(urg&&!isPaused()&&sec<=10&&sec!==uiTick.lastSec){uiTick.lastSec=sec;SFX.play('tick')}}
   $('timeFill').style.width=inf?'0%':(S.time/S.total*100).toFixed(2)+'%';
-  const mlab=S.mode==='run'?`ラン 第${S.run.stage}ステージ ・ `:{craft:'製造のみ（経過時間）・',online:'オンライン製造（一時停止なし）・'}[S.mode]||'';
+  const mlab=S.mode==='run'?`ラン 第${S.run.stage}ステージ ・ `:{craft:'製造のみ（経過時間）・',online:'オンライン製造（一時停止なし）・',std:S.tut?'':'一時停止なし ・ '}[S.mode]||'';
   {const ms=S.tut?'チュートリアル':{std:'スタンダード',craft:'製造のみ',online:'オンライン対戦',run:'ラン（3連戦）'}[S.mode]||'';const el=$('modeSub');if(el&&el.textContent!==ms)el.textContent=ms}
-  $('phaseLabel').textContent=S.tut?'チュートリアル（時間制限なし）':mlab+(S.phase==='skill'?'スキル選択中':S.phase==='result'?'終了':S.paused?'一時停止中':'設営中');
+  $('phaseLabel').textContent=S.tut?'チュートリアル（時間制限なし）':mlab+(S.phase==='skill'?'スキル選択中':S.phase==='result'?'終了':isPaused()?'一時停止中':'設営中');
   const cp=nextCp();
   const opp=GAME&&GAME.stage==='build'&&GAME.oppTl!=null?(GAME.oppTl==='done'?' ・ 相手は製造終了':' ・ 相手の残り '+fmt(GAME.oppTl)):'';
   $('nextPick').textContent=(!S.tut&&S.phase==='build'&&cp<Infinity?'次のスキル選択まで '+fmt(cp-S.time):'')+opp;
-  $('pauseBtn').textContent=S.paused?'再開':'一時停止';$('pauseBtn').classList.toggle('on',S.paused);
+  $('pauseBtn').hidden=noPause();$('pauseBtn').textContent=S.paused?'再開':'一時停止';$('pauseBtn').classList.toggle('on',S.paused);
   if(now-lastUi<200)return;lastUi=now;
   tutCheck();onlineBuildTick();
   const ph=partsHTML();if(ph!==lastParts){$('parts').innerHTML=ph;lastParts=ph}
@@ -2069,10 +2072,10 @@ document.addEventListener('keydown',e=>{
   const map={b:'belt',p:'pipe',x:'remove',s:'bsplit',d:'psplit','1':'miner','2':'pump','3':'furnace','4':'mixer','5':'enchanter','6':'chem'};
   if(k==='r'){rot=(rot+1)%4;updateHint()}
   else if(k==='escape'){if(drag&&drag.mode==='conv'){drag=null;return}tool=null;setTool(null)}
-  else if(k===' '){e.preventDefault();if(S.mode!=='online')S.paused=!S.paused}
+  else if(k===' '){e.preventDefault();if(noPause()){toast('スタンダードでは一時停止できません');SFX.play('bad')}else if(S.mode!=='online')S.paused=!S.paused}
   else if(map[k]){tool=null;setTool(map[k])}
 });
-$('pauseBtn').onclick=()=>{if(S.phase==='build'&&S.mode!=='online')S.paused=!S.paused};
+$('pauseBtn').onclick=()=>{if(S.phase==='build'&&S.mode!=='online'&&!noPause())S.paused=!S.paused};
 $('undoBtn').onclick=undo;
 const renderSfx=()=>{const b=$('sfxBtn');b.textContent=SFX.on?'音 ON':'音 OFF';b.setAttribute('aria-pressed',SFX.on);b.classList.toggle('on',SFX.on)};
 $('sfxBtn').onclick=()=>{SFX.toggle();renderSfx()};renderSfx();
@@ -2084,7 +2087,7 @@ armed($('newBtn'),'新しい盤面',()=>{$('overlay').hidden=true;newGame();rend
 let last=performance.now();
 function frame(now){
   const rdt=Math.min(.1,(now-last)/1000);last=now;
-  if(S.phase==='build'&&!S.paused){advance(rdt*S.speed);anim+=rdt*S.speed}
+  if(S.phase==='build'&&!isPaused()&&!(noPause()&&document.body.classList.contains('inbattle'))){advance(rdt*S.speed);anim+=rdt*S.speed}
   draw();uiTick(now);requestAnimationFrame(frame);
 }
 
