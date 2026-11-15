@@ -34,6 +34,12 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--brass);outlin
 .clock{display:flex;flex-direction:column;gap:4px;min-width:220px;flex:1 1 260px}
 .clock-row{display:flex;align-items:baseline;gap:12px}
 .clock-time{font-family:var(--f-mono);font-weight:700;font-size:30px;font-variant-numeric:tabular-nums;line-height:1}
+.clock-time.urgent{color:#ff6b55;animation:urgent 1s steps(2,end) infinite}
+@keyframes urgent{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.clock-time.urgent{animation:none}}
+.undo-row{display:flex;gap:8px;align-items:center;margin-top:10px}
+.undo-row .btn{padding:5px 10px;font-size:12px}
+.undo-row kbd{margin-left:4px}
 .clock-label{font-size:12px;color:var(--muted);letter-spacing:.08em}
 .clock-next{font-size:12px;color:var(--brass);margin-left:auto}
 .clock-bar{position:relative;height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
@@ -352,6 +358,7 @@ b.lan-ip{font-family:var(--f-mono);font-size:17px;color:var(--fg);user-select:al
       <div class="clock-bar" id="clockBar"><i id="timeFill" style="width:0%"></i></div>
     </div>
     <div class="ctrls">
+      <button class="btn" id="sfxBtn" type="button" aria-pressed="true" title="効果音のオン・オフ">音 ON</button>
       <button class="btn" id="pauseBtn" type="button">一時停止</button>
       <div class="seg" id="speedSeg"></div>
       <button class="btn primary" id="endBtn" type="button">設営を終える</button>
@@ -405,6 +412,7 @@ b.lan-ip{font-family:var(--f-mono);font-size:17px;color:var(--fg);user-select:al
       <section class="card-s">
         <h2>設備</h2>
         <div id="toolArea"></div>
+        <div class="undo-row"><button class="btn" id="undoBtn" type="button" disabled>元に戻す<kbd>Z</kbd></button><span class="clock-label" id="undoInfo"></span></div>
         <p class="hint" id="toolHint">設備を選んで盤面に置きます。</p>
       </section>
       <section class="card-s">
@@ -1317,7 +1325,7 @@ function onMade(id){
   if(S.made){const p=pre(id);S.made[p]=(S.made[p]||0)+1}
   if(pre(id)!=='alloy')return;const k=arg(id);if(!NAMED[k]||DISC.has(k))return;
   DISC.add(k);try{localStorage.setItem('robo-kosho-alloys',JSON.stringify([...DISC]))}catch(_){}
-  toast('隠し合金を発見：'+NAMED[k].n+'！ 材質図鑑に登録しました');
+  toast('隠し合金を発見：'+NAMED[k].n+'！ 材質図鑑に登録しました');SFX.play('alloy');
 }
 const PARTS=[{id:'head',n:'頭'},{id:'rarm',n:'右腕'},{id:'larm',n:'左腕'},{id:'body',n:'胴体'},{id:'rleg',n:'右足'},{id:'lleg',n:'左足'}];
 const PNAME=Object.fromEntries(PARTS.map(p=>[p.id,p.n]));
@@ -1369,6 +1377,52 @@ const SKILLS=[
   {id:'alloy',cat:'out',n:'合金信仰',d:'合金を使ったパーツの品質 +1',apply:m=>{m.alloyBonus+=1}},
   {id:'forge',cat:'out',n:'鍛造の心得',d:'溶融金属（合金でない金属）を使ったパーツの品質 +1',apply:m=>{m.forge+=1}},
 ];
+
+// ---------- 効果音（WebAudio で合成。音声ファイルは使わない）----------
+const SFX=(()=>{
+  let ac=null,master=null,on=true;const last={};
+  try{if(localStorage.getItem('robo-kosho-sfx')==='0')on=false}catch(_){}
+  function ctx(){
+    if(!ac){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;ac=new C();master=ac.createGain();master.gain.value=.32;master.connect(ac.destination)}
+    if(ac.state==='suspended')ac.resume().catch(()=>{});return ac}
+  function tone(f,d,o={}){const a=ctx();if(!a)return;const {type='square',g=.2,at=0,slide=0}=o,t=a.currentTime+at,osc=a.createOscillator(),gn=a.createGain();
+    osc.type=type;osc.frequency.setValueAtTime(f,t);if(slide)osc.frequency.exponentialRampToValueAtTime(Math.max(30,f*slide),t+d);
+    gn.gain.setValueAtTime(0,t);gn.gain.linearRampToValueAtTime(g,t+.005);gn.gain.exponentialRampToValueAtTime(.0001,t+d);osc.connect(gn);gn.connect(master);osc.start(t);osc.stop(t+d+.03)}
+  function noise(d,o={}){const a=ctx();if(!a)return;const {g=.2,at=0,lp=2000,hp=0}=o,t=a.currentTime+at,n=Math.ceil(a.sampleRate*d),buf=a.createBuffer(1,n,a.sampleRate),ch=buf.getChannelData(0);
+    for(let i=0;i<n;i++)ch[i]=(Math.random()*2-1)*(1-i/n);
+    const src=a.createBufferSource();src.buffer=buf;const f=a.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;src.connect(f);let node=f;
+    if(hp){const h=a.createBiquadFilter();h.type='highpass';h.frequency.value=hp;node.connect(h);node=h}
+    const gn=a.createGain();gn.gain.setValueAtTime(g,t);gn.gain.exponentialRampToValueAtTime(.0001,t+d);node.connect(gn);gn.connect(master);src.start(t)}
+  const arp=(fs,d,o,step)=>fs.forEach((f,i)=>tone(f,d,{...o,at:i*step}));
+  const P={
+    place:()=>{tone(520,.07,{g:.11});tone(780,.06,{g:.08,at:.04})},
+    conv:()=>tone(660,.05,{type:'triangle',g:.13}),
+    remove:()=>{tone(260,.12,{type:'sawtooth',g:.09,slide:.5});noise(.08,{g:.07,lp:900})},
+    undo:()=>{tone(700,.06,{type:'triangle',g:.12,slide:.6});tone(500,.08,{type:'triangle',g:.1,at:.05,slide:.7})},
+    bad:()=>{tone(150,.12,{g:.08});tone(140,.12,{g:.06,at:.07})},
+    deliver:()=>tone(1040,.05,{type:'sine',g:.09}),
+    star:()=>arp([523,659,784,1047],.16,{g:.09},.07),
+    alloy:()=>arp([784,988,1175,1568],.3,{type:'triangle',g:.12},.09),
+    skill:()=>{tone(440,.12,{type:'triangle',g:.12});tone(660,.2,{type:'triangle',g:.12,at:.08})},
+    tick:()=>tone(1250,.03,{g:.05}),
+    end:()=>arp([392,523,659,784],.22,{g:.09},.1),
+    swing:()=>noise(.12,{g:.1,lp:3200,hp:700}),
+    hit:()=>{noise(.1,{g:.22,lp:1400});tone(150,.12,{g:.11,slide:.6})},
+    crit:()=>{noise(.16,{g:.28,lp:3200});tone(230,.2,{type:'sawtooth',g:.13,slide:.4});tone(1320,.08,{g:.07,at:.02})},
+    brk:()=>{noise(.35,{g:.32,lp:2200});tone(95,.35,{type:'sawtooth',g:.15,slide:.5})},
+    win:()=>arp([523,659,784,1047,784,1047],.2,{g:.1},.11),
+    lose:()=>arp([392,349,311,262],.3,{type:'triangle',g:.12},.17),
+  };
+  return {
+    play(k,gap=0){if(!on||!P[k])return;const n=performance.now();if(gap&&last[k]&&n-last[k]<gap)return;last[k]=n;try{P[k]()}catch(_){}},
+    get on(){return on},
+    toggle(){on=!on;try{localStorage.setItem('robo-kosho-sfx',on?'1':'0')}catch(_){}if(on)this.play('conv');return on},
+    unlock(){if(on)ctx()},
+  };
+})();
+// 盤面の上に浮かぶ文字（★が上がったときなど）
+let FLOATS=[];
+function floatText(x,y,text,col){FLOATS.push({x,y,text,col,born:performance.now()});if(FLOATS.length>24)FLOATS.shift()}
 
 // ---------- helpers ----------
 const $=id=>document.getElementById(id);
@@ -1438,7 +1492,7 @@ function newGame(opts={}){
   gems.forEach(g=>{list.push(g);if(Math.random()<.3)list.push(g)});
   shuffle(list).forEach(r=>addNode(r));
   }finally{Math.random=_rnd}
-  tool=null;drag=null;$('tut').hidden=true;
+  tool=null;drag=null;$('tut').hidden=true;FLOATS=[];clearUndo();
   renderTools();renderLegend();renderSkillList();
   if(metaReady){applyPerk();S.perked=1}
   openSkill();
@@ -1483,7 +1537,7 @@ function checkBuild(toolId,x,y){
   r.ok=true;return r;
 }
 function placeBuilding(c){
-  const b={id:S.nid++,type:c.type,part:c.part,x:c.x,y:c.y,w:c.w,h:c.h,inv:{},out:[],craft:null,t:0,rr:0,status:'wait',node:c.node,flash:0,save:false,perim:[]};
+  const b={id:c.id||S.nid++,type:c.type,part:c.part,x:c.x,y:c.y,w:c.w,h:c.h,inv:{},out:[],craft:null,t:0,rr:0,status:'wait',node:c.node,flash:0,save:false,perim:[]};
   for(let yy=b.y;yy<b.y+b.h;yy++)for(let xx=b.x;xx<b.x+b.w;xx++){
     S.bAt[yy][xx]=b.id;
     for(let d=0;d<4;d++){const nx=xx+DX[d],ny=yy+DY[d];if(!inB(nx,ny))continue;if(nx>=b.x&&nx<b.x+b.w&&ny>=b.y&&ny<b.y+b.h)continue;b.perim.push({x:nx,y:ny,d})}
@@ -1504,7 +1558,7 @@ function placeConv(kind,x,y,dir,mode='plain'){
 const convKind=t=>t==='belt'||t==='bsplit'?'belt':t==='pipe'||t==='psplit'?'pipe':null;
 function removeBuilding(b){for(let yy=b.y;yy<b.y+b.h;yy++)for(let xx=b.x;xx<b.x+b.w;xx++)S.bAt[yy][xx]=0;S.bs.delete(b.id);recount();if(b.type==='molder')renderTools()}
 function removeNode(i){
-  const n=S.nodes[i];n.gone=true;
+  const n=S.nodes[i];n.gone=true;clearUndo();
   for(let yy=n.y;yy<n.y+2;yy++)for(let xx=n.x;xx<n.x+2;xx++)S.nodeAt[yy][xx]=-1;
   let lost=0;
   for(const b of [...S.bs.values()])if(isExt(b)&&b.node===i){const j=adjNode(b.x,b.y,b.type==='pump');if(j>=0)b.node=j;else{removeBuilding(b);lost++}}
@@ -1512,11 +1566,38 @@ function removeNode(i){
   toast((RES[n.res].node||RES[n.res].n+'の鉱脈')+'を撤去しました（再設置はできません）'+(lost?` ・ つないでいた採掘機・ポンプ${lost}基も撤去`:''));
 }
 function removeAt(x,y){
-  if(!inB(x,y))return;
+  if(!inB(x,y))return false;
   const id=S.bAt[y][x];
-  if(id){removeBuilding(S.bs.get(id));return}
-  if(S.belt[y][x]){S.belt[y][x]=null;return}
-  if(S.pipe[y][x])S.pipe[y][x]=null;
+  if(id){removeBuilding(S.bs.get(id));return true}
+  if(S.belt[y][x]){S.belt[y][x]=null;return true}
+  if(S.pipe[y][x]){S.pipe[y][x]=null;return true}
+  return false;
+}
+// ---- 元に戻す：1回の操作（クリック／ドラッグ）ごとに、設備・ベルト・パイプの配置を記録する。中身（運搬中の品物など）は戻さない
+let undoStack=[],editSnap=null;
+const UNDO_MAX=40;
+function structSnap(){const cv=g=>g.map(r=>r.map(c=>c?[c.dir,c.split?1:0]:0));
+  return {bs:[...S.bs.values()].map(b=>({id:b.id,type:b.type,part:b.part,x:b.x,y:b.y,w:b.w,h:b.h,node:b.node})),belt:cv(S.belt),pipe:cv(S.pipe)}}
+const snapKey=sn=>JSON.stringify([sn.bs.map(b=>b.id),sn.belt,sn.pipe]);
+function beginEdit(){if(S.phase!=='build')return;editSnap=structSnap();editSnap.key=snapKey(editSnap)}
+function commitEdit(){if(!editSnap)return;const sn=editSnap;editSnap=null;if(snapKey(structSnap())===sn.key)return;undoStack.push(sn);if(undoStack.length>UNDO_MAX)undoStack.shift();renderUndo()}
+function clearUndo(){undoStack=[];editSnap=null;renderUndo()}
+function renderUndo(){const b=$('undoBtn');if(!b)return;b.disabled=!undoStack.length;$('undoInfo').textContent=undoStack.length?`あと ${undoStack.length} 回`:''}
+function undo(){
+  if(!S||S.phase!=='build')return;
+  if(!undoStack.length){toast('元に戻せる操作がありません');SFX.play('bad');return}
+  const sn=undoStack.pop(),keep=new Map(sn.bs.map(b=>[b.id,b]));
+  for(const b of [...S.bs.values()])if(!keep.has(b.id))removeBuilding(b);
+  const back=(g,src)=>{for(let y=0;y<H;y++)for(let x=0;x<W;x++){const v=src[y][x],c=g[y][x];
+    if(!v){g[y][x]=null;continue}
+    if(c){c.dir=v[0];c.split=!!v[1]}else g[y][x]={dir:v[0],item:null,split:!!v[1],rr:0}}};
+  back(S.belt,sn.belt);back(S.pipe,sn.pipe);
+  for(const d of sn.bs)if(!S.bs.has(d.id)){
+    if((d.type==='miner'||d.type==='pump')&&(!S.nodes[d.node]||S.nodes[d.node].gone))continue;
+    let free=true;for(let yy=d.y;yy<d.y+d.h;yy++)for(let xx=d.x;xx<d.x+d.w;xx++)if(S.bAt[yy][xx]||S.nodeAt[yy][xx]>=0)free=false;
+    if(free)placeBuilding({...d});
+  }
+  recount();renderUndo();SFX.play('undo');toast('ひとつ前の配置に戻しました');
 }
 function recount(){S.nodes.forEach(n=>n.ext=0);for(const b of S.bs.values())if(isExt(b))S.nodes[b.node].ext++}
 
@@ -1577,8 +1658,13 @@ function deliver(b){
   const pp=pre(c.prim);if(pp==='alloy'||(pp==='coat'&&c.prim.includes('+')))q+=m.alloyBonus;else q+=m.forge;
   let n=1;if(P.count===0&&m.firstDouble)n+=3;if(Math.random()<m.twin)n++;
   if(m.inspect&&Math.floor((P.count+n)/4)>Math.floor(P.count/4))n+=2;
+  const s0=star(P.count),q0=P.q;
   P.count+=n;if(q>P.q||(q===P.q&&c.sec&&!P.sec)){P.q=q;P.prim=c.prim;P.sec=c.sec}
   b.flash=.5;
+  {const cx=(b.x+b.w/2)*CELL,cy=b.y*CELL,s1=star(P.count);
+    if(s1>s0){floatText(cx,cy,`${PNAME[b.part]} ★${s1}`,'#f3c968');SFX.play('star',120)}
+    else if(P.q>q0&&q0>=0){floatText(cx,cy,`品質 ${P.q}`,'#8fd8ff');SFX.play('star',120)}
+    else{floatText(cx,cy,'+'+n,'#ebe4d3');SFX.play('deliver',140)}}
 }
 function tryPush(b){
   const item=b.out[0],liq=isLiquid(item),g=liq?S.pipe:S.belt,n=b.perim.length;
@@ -1666,7 +1752,7 @@ function renderSkillModal(){
 }
 function choose(id){
   const s=SKILLS.find(k=>k.id===id);
-  S.taken.push(id);S.picks++;$('overlay').hidden=true;S.phase='build';
+  S.taken.push(id);S.picks++;$('overlay').hidden=true;S.phase='build';SFX.play('skill');
   s.apply(S.mods);
   if(id!=='newvein')toast('スキル取得：'+s.n);
   renderSkillList();
@@ -1674,6 +1760,7 @@ function choose(id){
 }
 function partPower(P){const s=star(P.count);return P.count?Math.round((8+5*Math.max(0,P.q))*Math.pow(1.4,s-1)):0}
 function endBuild(){
+  if(S.phase==='build')SFX.play('end');
   if(!S.recorded&&S.mode!=='run'){S.recorded=1;metaRecordBuild()}
   if(S.mode==='run'){S.phase='result';drag=null;$('modal').innerHTML=runResultHTML()+`<div class="mfoot"><button class="btn" id="viewBtn" type="button">盤面を見る</button><button class="btn on" id="runFight" type="button">${RUN_FOE[S.run.stage-1].n}へ</button></div>`;$('overlay').hidden=false;$('viewBtn').onclick=()=>{$('overlay').hidden=true};$('runFight').onclick=startRunBattle;return}
   if(S.mode==='online'&&GAME&&GAME.stage==='build'){S.phase='result';drag=null;onlineBuildDone();return}
@@ -1802,6 +1889,11 @@ function draw(){
       const [t,pt]=tool.split(':');c.fillText(pt?PNAME[pt]:BDEF[t].s,(k.x+k.w/2)*CELL,(k.y+k.h/2)*CELL)}
     else{c.strokeStyle='rgba(235,228,211,.35)';c.lineWidth=1;c.strokeRect(hx+1,hy+1,CELL-2,CELL-2)}
   }
+  if(FLOATS.length){const now=performance.now();FLOATS=FLOATS.filter(f=>now-f.born<1300);
+    c.textAlign='center';c.textBaseline='bottom';c.font='bold 14px DotGothic16, monospace';
+    for(const f of FLOATS){const k=(now-f.born)/1300,y=Math.max(14,f.y-4-k*26);c.globalAlpha=Math.min(1,(1-k)*2);
+      c.lineWidth=3;c.strokeStyle='rgba(10,14,16,.85)';c.strokeText(f.text,f.x,y);c.fillStyle=f.col;c.fillText(f.text,f.x,y)}
+    c.globalAlpha=1}
 }
 function drawSplit(x,y,cv,kind,small=false,alpha=1){
   const c=ctx;c.save();c.globalAlpha=alpha;c.translate(x*CELL+CELL/2,y*CELL+CELL/2);c.rotate(cv.dir*Math.PI/2);
@@ -1880,6 +1972,8 @@ function uiTick(now){
   const left=S.total-S.time;
   const inf=S.total===Infinity;
   $('timeLeft').textContent=S.tut?'練習':inf?fmt(S.time):fmt(left);
+  {const urg=!S.tut&&!inf&&S.phase==='build'&&left<=30;$('timeLeft').classList.toggle('urgent',urg);
+   const sec=Math.ceil(left);if(urg&&!S.paused&&sec<=10&&sec!==uiTick.lastSec){uiTick.lastSec=sec;SFX.play('tick')}}
   $('timeFill').style.width=inf?'0%':(S.time/S.total*100).toFixed(2)+'%';
   const mlab=S.mode==='run'?`ラン 第${S.run.stage}ステージ ・ `:{craft:'製造のみ（経過時間）・',online:'オンライン製造（一時停止なし）・'}[S.mode]||'';
   {const ms=S.tut?'チュートリアル':{std:'スタンダード',craft:'製造のみ',online:'オンライン対戦',run:'ラン（3連戦）'}[S.mode]||'';const el=$('modeSub');if(el&&el.textContent!==ms)el.textContent=ms}
@@ -1921,6 +2015,7 @@ function commitConv(d){
   cells.forEach(c=>{if(!placeConv(d.kind,c.x,c.y,c.dir,cells.length>1?'drag':'plain'))bad++});
   rot=cells[cells.length-1].dir;updateHint();
   if(bad)toast(bad===cells.length?'ノードや設備の上には置けません':`${bad}マスはノードや設備と重なるので置けませんでした`);
+  SFX.play(bad===cells.length?'bad':'conv');
 }
 function drawConvGhost(){
   if(!drag||drag.mode!=='conv')return;const cells=convPath(drag),c=ctx;
@@ -1940,35 +2035,37 @@ cvs.addEventListener('contextmenu',e=>e.preventDefault());
 cvs.addEventListener('pointerdown',e=>{
   if(S.phase!=='build')return;const p=cellOf(e);if(!p)return;
   try{cvs.setPointerCapture(e.pointerId)}catch(_){}
-  hover=p;
+  hover=p;beginEdit();
   // スマホ：設備・ベルト・パイプを長押しすると撤去（ノードは撤去ツールのみ）
   if(e.pointerType!=='mouse'&&tool!=='remove'&&(S.bAt[p.y][p.x]||S.belt[p.y][p.x]||S.pipe[p.y][p.x])){
     clearTimeout(lpT);drag={mode:'lp',last:p};
-    lpT=setTimeout(()=>{if(drag&&drag.mode==='lp'){removeAt(p.x,p.y);toast('撤去しました');try{navigator.vibrate&&navigator.vibrate(15)}catch(_){}drag=null}},450);return}
-  if(e.button===2||tool==='remove'){drag={mode:'remove',last:p};const ni=S.nodeAt[p.y][p.x];if(ni>=0)removeNode(ni);else removeAt(p.x,p.y);return}
+    lpT=setTimeout(()=>{if(drag&&drag.mode==='lp'){removeAt(p.x,p.y);SFX.play('remove');commitEdit();toast('撤去しました');try{navigator.vibrate&&navigator.vibrate(15)}catch(_){}drag=null}},450);return}
+  if(e.button===2||tool==='remove'){drag={mode:'remove',last:p};const ni=S.nodeAt[p.y][p.x];if(ni>=0){removeNode(ni);SFX.play('remove')}else if(removeAt(p.x,p.y))SFX.play('remove');return}
   if(!tool)return;
-  if(tool==='bsplit'||tool==='psplit'){const kd=convKind(tool);drag={mode:'build',last:p};if(!placeConv(kd,p.x,p.y,rot,'split'))toast('ノードや設備の上には置けません');return}
+  if(tool==='bsplit'||tool==='psplit'){const kd=convKind(tool);drag={mode:'build',last:p};if(!placeConv(kd,p.x,p.y,rot,'split')){toast('ノードや設備の上には置けません');SFX.play('bad')}else SFX.play('conv');return}
   if(tool==='belt'||tool==='pipe'){drag={mode:'conv',kind:tool,start:p,end:p,last:p,axis:null};return}
-  const k=checkBuild(tool,p.x,p.y);if(k.ok)placeBuilding(k);else toast(k.reason);
+  const k=checkBuild(tool,p.x,p.y);if(k.ok){placeBuilding(k);SFX.play('place')}else{toast(k.reason);SFX.play('bad')}
   drag={mode:'build',last:p};
 });
 cvs.addEventListener('pointermove',e=>{
   const p=cellOf(e);hover=p;if(!drag||!p||S.phase!=='build')return;
   if(p.x===drag.last.x&&p.y===drag.last.y)return;
   if(drag.mode==='lp'){clearTimeout(lpT);if(tool==='belt'||tool==='pipe')drag={mode:'conv',kind:tool,start:drag.last,end:drag.last,last:drag.last,axis:null};else{drag=null;return}}
-  if(drag.mode==='remove')removeAt(p.x,p.y);
+  if(drag.mode==='remove'){if(removeAt(p.x,p.y))SFX.play('remove',60)}
   else if(drag.mode==='conv'){drag.end=p}
-  else if(drag.mode==='build'&&tool&&!convKind(tool)){const k=checkBuild(tool,p.x,p.y);if(k.ok)placeBuilding(k)}
+  else if(drag.mode==='build'&&tool&&!convKind(tool)){const k=checkBuild(tool,p.x,p.y);if(k.ok){placeBuilding(k);SFX.play('place')}}
   drag.last=p;
 });
 let lpT=0;
 const endDrag=()=>{clearTimeout(lpT);drag=null};
-cvs.addEventListener('pointerup',()=>{if(drag&&drag.mode==='conv'&&S.phase==='build')commitConv(drag);endDrag()});cvs.addEventListener('pointercancel',endDrag);
+cvs.addEventListener('pointerup',()=>{if(drag&&drag.mode==='conv'&&S.phase==='build')commitConv(drag);endDrag();commitEdit()});cvs.addEventListener('pointercancel',()=>{endDrag();commitEdit()});
+document.addEventListener('pointerdown',()=>SFX.unlock(),{passive:true});
 cvs.addEventListener('pointerleave',()=>{if(!drag)hover=null});
 document.addEventListener('keydown',e=>{
   if(e.target.closest&&e.target.closest('input,textarea'))return;
-  const k=e.key.toLowerCase();
+  const k=e.key.toLowerCase();SFX.unlock();
   if(S.phase!=='build'||document.body.classList.contains('inbattle')){return}
+  if(k==='z'&&!e.altKey){e.preventDefault();undo();return}
   const map={b:'belt',p:'pipe',x:'remove',s:'bsplit',d:'psplit','1':'miner','2':'pump','3':'furnace','4':'mixer','5':'enchanter','6':'chem'};
   if(k==='r'){rot=(rot+1)%4;updateHint()}
   else if(k==='escape'){if(drag&&drag.mode==='conv'){drag=null;return}tool=null;setTool(null)}
@@ -1976,6 +2073,9 @@ document.addEventListener('keydown',e=>{
   else if(map[k]){tool=null;setTool(map[k])}
 });
 $('pauseBtn').onclick=()=>{if(S.phase==='build'&&S.mode!=='online')S.paused=!S.paused};
+$('undoBtn').onclick=undo;
+const renderSfx=()=>{const b=$('sfxBtn');b.textContent=SFX.on?'音 ON':'音 OFF';b.setAttribute('aria-pressed',SFX.on);b.classList.toggle('on',SFX.on)};
+$('sfxBtn').onclick=()=>{SFX.toggle();renderSfx()};renderSfx();
 function armed(btn,label,fn){let t=0;btn.onclick=()=>{if(btn.dataset.arm){clearTimeout(t);delete btn.dataset.arm;btn.textContent=label;btn.classList.remove('warn');fn();return}
   btn.dataset.arm='1';btn.textContent='もう一度押して確定';btn.classList.add('warn');t=setTimeout(()=>{delete btn.dataset.arm;btn.textContent=label;btn.classList.remove('warn')},2500)}}
 armed($('endBtn'),'設営を終える',()=>{if(S.phase==='build')endBuild()});
@@ -2264,7 +2364,7 @@ function updateHP(id,u){
 }
 function updatePD(id,u){const c=$(id==='uP'?'vbP':'vbE');if(!c)return;const el=c.querySelector('.pdrow');if(el)el.innerHTML=pdPips(u)}
 function breakFx(id,u){
-  updatePD(id,u);const c=$(id==='uP'?'vbP':'vbE');if(c)replay(c,'brkflash');
+  SFX.play('brk');updatePD(id,u);const c=$(id==='uP'?'vbP':'vbE');if(c)replay(c,'brkflash');
   if(ARENA){const side=id==='uP'?'left':'right',parts=arenaParts(u),k=JSON.stringify(parts);try{const bs=side==='right'&&isBossUnit(u);ARENA.setParts(side,parts,side==='right',bs);arenaKey[side]=k+(side==='right'?bs:'');arenaAura()}catch(_){}}
 }
 function pdPips(u){return PARTS.map(p=>{const d=u.pd[p.id],r=d.hp/d.max;return `<span class="pip ${r<=0?'gone':r<.35?'low':''}" title="${p.n} ${d.hp}/${d.max}"><i style="height:${Math.max(0,r*100).toFixed(0)}%"></i><b>${p.n}</b></span>`}).join('')}
@@ -2276,6 +2376,7 @@ function playTurn(acts,rng){
     if(x.att.hp<=0||x.def.hp<=0)return;
     const aId=x.att===B.P?'uP':'uE',dId=aId==='uP'?'uE':'uP';
     const r=calcHit(x.att,x.def,x.ap,x.dp,rng);
+    SFX.play('swing');setTimeout(()=>SFX.play(r.crit?'crit':'hit'),ARENA?(REDUCED?60:330):(REDUCED?0:240));
     if(ARENA){try{await ARENA.attack(x.att===B.P?'left':'right',x.ap,{dmg:r.dmg,crit:r.crit,miss:false,def:x.dp})}catch(_){}}
     else{animAttack(aId,x.att,x.ap);await wait(REDUCED?0:260)}
     if(!B)return;
@@ -2311,7 +2412,7 @@ async function endBattle(){
   const P=B.P,E=B.E,pr=P.hp/P.maxHp,er=E.hp/E.maxHp;
   const win=B.forfeit==='opp'?true:E.hp<=0&&P.hp>0?true:P.hp<=0&&E.hp>0?false:pr>=er;
   const how=B.forfeit==='opp'?'相手の切断':P.hp<=0||E.hp<=0?'ノックアウト':'判定（残り体力の割合）';
-  addLog(`<span class="sys">試合終了：${how}で${win?P.name:E.name}の勝利。</span>`);
+  addLog(`<span class="sys">試合終了：${how}で${win?P.name:E.name}の勝利。</span>`);SFX.play(win?'win':'lose');
   let fresh=[];if(!B.recorded){B.recorded=1;fresh=metaRecordBattle(win&&(B.online||(B.diff||0)>=0),!!B.online)}
   if(B.run&&S.mode==='run'){runAfterBattle(win,fresh);return}
   $('modal').innerHTML=`<div><div class="eyebrow">試合終了 ・ ${how}</div><h2>${win?'勝利':'敗北'}</h2><p>${B.turn} ターンで決着しました。${win&&!B.online&&(B.diff||0)<0?'（格下との対戦は勝利数に数えません）':''}</p>${fresh.length?`<p class="good">新しく解放：${fresh.join('、')}</p>`:''}</div>
